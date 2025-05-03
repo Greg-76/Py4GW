@@ -2,8 +2,9 @@ from Py4GWCoreLib import *
 from .custom_skill import *
 from .types import *
 from .targeting import *
+from .avoidance_system import AvoidanceSystem
+from .priority_targets import PriorityTargets
 from typing import Optional
-
 
 MAX_SKILLS = 8
 custom_skill_data_handler = CustomSkillClass()
@@ -91,15 +92,68 @@ class CombatClass:
         self.is_targeting_enabled = False
         self.is_combat_enabled = False
         self.is_skill_enabled = []
+
+        self.priority_target_id = 0
+        self.target_id = 0  # ID of current target during cast routine
         
-        self.nearest_enemy = Routines.Agents.GetNearestEnemy(self.get_combat_distance())
-        self.lowest_ally = TargetLowestAlly()
-        self.lowest_ally_energy = TargetLowestAllyEnergy()
-        self.nearest_npc = Routines.Agents.GetNearestNPC(Range.Spellcast.value)
-        self.nearest_spirit = Routines.Agents.GetNearestSpirit(Range.Spellcast.value)
-        self.lowest_minion = Routines.Agents.GetLowestMinion(Range.Spellcast.value)
-        self.nearest_corpse = Routines.Agents.GetNearestCorpse(Range.Spellcast.value)
+        # Cache for target selection
+        self._cached_targets = {}
+        self._target_cache_timer = Timer()
+        self._target_cache_timer.Start()
         
+        # Lazy loading caches
+        self._enemy_cache_timer = Timer()
+        self._enemy_cache_timer.Start()
+        
+        # Skillbar hash for change detection
+        self._last_skillbar_hash = None
+        
+        # Next skill prediction
+        self._next_skill_slot = None
+        
+        # Initialize skill IDs
+        self._init_skill_ids()
+    
+    @property
+    def nearest_enemy(self):
+        """Lazy loaded nearest enemy"""
+        if not hasattr(self, '_nearest_enemy') or self._enemy_cache_timer.HasElapsed(100):
+            self._nearest_enemy = Routines.Agents.GetNearestEnemy(self.get_combat_distance())
+            self._enemy_cache_timer.Reset()
+        return self._nearest_enemy
+    
+    @property
+    def lowest_ally(self):
+        """Lazy loaded lowest ally"""
+        if not hasattr(self, '_lowest_ally') or self._target_cache_timer.HasElapsed(100):
+            self._lowest_ally = TargetLowestAlly()
+        return self._lowest_ally
+    
+    @property
+    def nearest_spirit(self):
+        """Lazy loaded nearest spirit"""
+        if not hasattr(self, '_nearest_spirit') or self._target_cache_timer.HasElapsed(200):
+            self._nearest_spirit = Routines.Agents.GetNearestSpirit(Range.Spellcast.value)
+        return self._nearest_spirit
+    
+    def GetNextSkill(self):
+        """Pre-calculate next skill while current is casting"""
+        next_pointer = (self.skill_pointer + 1) % MAX_SKILLS
+        
+        # Try to find the next available skill
+        for i in range(MAX_SKILLS):
+            check_slot = (next_pointer + i) % MAX_SKILLS
+            if self.IsSkillReady(check_slot):
+                is_ready_to_cast, target_agent_id = self.IsReadyToCast(check_slot)
+                if is_ready_to_cast and target_agent_id != 0:
+                    self._next_skill_slot = check_slot
+                    return check_slot
+        
+        self._next_skill_slot = None
+        return None
+            
+    def _init_skill_ids(self):
+        """Initialize all skill IDs"""
         self.energy_drain = Skill.GetID("Energy_Drain") 
         self.energy_tap = Skill.GetID("Energy_Tap")
         self.ether_lord = Skill.GetID("Ether_Lord")
@@ -147,6 +201,14 @@ class CombatClass:
         self.heal_as_one = Skill.GetID("Heal_as_One")
         self.heroic_refrain = Skill.GetID("Heroic_Refrain")
         
+    def _calculate_skillbar_hash(self):
+        """Calculate a hash of the current skillbar for change detection"""
+        hash_value = 0
+        for i in range(MAX_SKILLS):
+            skill_id = SkillBar.GetSkillIDBySlot(i+1)
+            hash_value ^= hash(skill_id) << i
+        return hash_value
+        
     def Update(self, cached_data):
         self.in_aggro = cached_data.in_aggro
         self.is_targeting_enabled = cached_data.is_targeting_enabled
@@ -157,6 +219,13 @@ class CombatClass:
         """
         Create a priority-based skill execution order.
         """
+        # Check if skillbar has changed
+        current_skillbar_hash = self._calculate_skillbar_hash()
+        if hasattr(self, '_last_skillbar_hash') and self._last_skillbar_hash == current_skillbar_hash:
+            return  # No need to recalculate
+        
+        self._last_skillbar_hash = current_skillbar_hash
+        
         #initialize skillbar
         original_skills = []
         for i in range(MAX_SKILLS):
@@ -209,7 +278,6 @@ class CombatClass:
             SkillType.Attack,
         ]
 
-        
         for skill_type in skill_types:
             for i in range(ptr,MAX_SKILLS):
                 skill = original_skills[i]
@@ -277,13 +345,34 @@ class CombatClass:
         return self.is_skill_enabled[original_index]
         
     def InCastingRoutine(self):
+        # If not in casting routine, nothing to do
+        if not self.in_casting_routine:
+            return False
+        
+        # Check if we still have a valid target
+        if self.target_id != 0:
+            # If target is dead, exit routine immediately
+            if not Agent.IsAlive(self.target_id):
+                self.in_casting_routine = False
+                self.aftercast_timer.Reset()
+                return False
+        
+        # Check if player is no longer casting
+        if not Agent.IsCasting(Player.GetAgentID()):
+            # If minimum aftercast time has elapsed (avoid spamming too fast)
+            min_aftercast = 250  # minimum delay in ms to avoid spam
+            if self.aftercast_timer.HasElapsed(min_aftercast):
+                self.in_casting_routine = False
+                self.aftercast_timer.Reset()
+                return False
+        
+        # Check if total time has elapsed
         if self.aftercast_timer.HasElapsed(self.aftercast):
             self.in_casting_routine = False
-            #if self.in_aggro:
-            #    self.ChooseTarget(interact=True)
             self.aftercast_timer.Reset()
-
-        return self.in_casting_routine
+            return False
+        
+        return True
  
     def GetPartyTargetID(self):
         if not Party.IsPartyLoaded():
@@ -305,7 +394,9 @@ class CombatClass:
                 if Agent.IsLiving(party_target):
                     _, alliegeance = Agent.GetAllegiance(party_target)
                     if alliegeance != 'Ally' and alliegeance != 'NPC/Minipet' and self.is_combat_enabled:
-                        ActionQueueManager().AddAction("ACTION", Player.ChangeTarget, party_target)
+                        current_target = Player.GetTargetID()
+                        if current_target != party_target:
+                            ActionQueueManager().AddAction("ACTION", Player.ChangeTarget, party_target)
                         return party_target
         return 0
 
@@ -318,59 +409,62 @@ class CombatClass:
         if not self.is_targeting_enabled:
             return Player.GetTargetID()
 
+        # Cache frequently used values
+        if not hasattr(self, '_cached_targets') or self._target_cache_timer.HasElapsed(100):
+            self._cached_targets = {
+                'nearest_enemy': self.nearest_enemy,  # Use lazy property
+                'lowest_ally': self.lowest_ally,      # Use lazy property
+                'party_target': self.GetPartyTarget(),
+                'priority_target': self.priority_target_id if self.priority_target_id != 0 and Agent.IsAlive(self.priority_target_id) else 0
+            }
+            self._target_cache_timer.Reset()
+        
+        # Use cached values
         targeting_strict = self.skills[slot].custom_skill_data.Conditions.TargetingStrict
         target_allegiance = self.skills[slot].custom_skill_data.TargetAllegiance
         
-        
-        nearest_enemy = Routines.Agents.GetNearestEnemy(self.get_combat_distance())
-        lowest_ally = TargetLowestAlly(filter_skill_id=self.skills[slot].skill_id)
-
-        if self.skills[slot].skill_id == self.heroic_refrain:
-            if not self.HasEffect(Player.GetAgentID(), self.heroic_refrain):
-                return Player.GetAgentID()
-
+        # Priority logic using cached values
         if target_allegiance == Skilltarget.Enemy:
-            v_target = self.GetPartyTarget()
-            if v_target == 0:
-                v_target = nearest_enemy
+            v_target = (self._cached_targets['priority_target'] or 
+                       self._cached_targets['party_target'] or 
+                       self._cached_targets['nearest_enemy'])
         elif target_allegiance == Skilltarget.EnemyCaster:
             v_target = Routines.Agents.GetNearestEnemyCaster(self.get_combat_distance())
             if v_target == 0 and not targeting_strict:
-                v_target =nearest_enemy
+                v_target = self._cached_targets['nearest_enemy']
         elif target_allegiance == Skilltarget.EnemyMartial:
             v_target = Routines.Agents.GetNearestEnemyMartial(self.get_combat_distance())
             if v_target == 0 and not targeting_strict:
-                v_target = nearest_enemy
+                v_target = self._cached_targets['nearest_enemy']
         elif target_allegiance == Skilltarget.EnemyMartialMelee:
             v_target = Routines.Agents.GetNearestEnemyMelee(self.get_combat_distance())
             if v_target == 0 and not targeting_strict:
-                v_target = nearest_enemy
+                v_target = self._cached_targets['nearest_enemy']
         elif target_allegiance == Skilltarget.AllyMartialRanged:
             v_target = Routines.Agents.GetNearestEnemyRanged(self.get_combat_distance())
             if v_target == 0 and not targeting_strict:
-                v_target = nearest_enemy
+                v_target = self._cached_targets['nearest_enemy']
         elif target_allegiance == Skilltarget.Ally:
-            v_target = lowest_ally
+            v_target = self._cached_targets['lowest_ally']
         elif target_allegiance == Skilltarget.AllyCaster:
             v_target = TargetLowestAllyCaster(filter_skill_id=self.skills[slot].skill_id)
             if v_target == 0 and not targeting_strict:
-                v_target = lowest_ally
+                v_target = self._cached_targets['lowest_ally']
         elif target_allegiance == Skilltarget.AllyMartial:
             v_target = TargetLowestAllyMartial(filter_skill_id=self.skills[slot].skill_id)
             if v_target == 0 and not targeting_strict:
-                v_target = lowest_ally
+                v_target = self._cached_targets['lowest_ally']
         elif target_allegiance == Skilltarget.AllyMartialMelee:
             v_target = TargetLowestAllyMelee(filter_skill_id=self.skills[slot].skill_id)
             if v_target == 0 and not targeting_strict:
-                v_target = lowest_ally
+                v_target = self._cached_targets['lowest_ally']
         elif target_allegiance == Skilltarget.AllyMartialRanged:
             v_target = TargetLowestAllyRanged(filter_skill_id=self.skills[slot].skill_id)
             if v_target == 0 and not targeting_strict:
-                v_target = lowest_ally
+                v_target = self._cached_targets['lowest_ally']
         elif target_allegiance == Skilltarget.OtherAlly:
             if self.skills[slot].custom_skill_data.Nature == SkillNature.EnergyBuff.value:
                 v_target = TargetLowestAllyEnergy(other_ally=True, filter_skill_id=self.skills[slot].skill_id)
-                #print("Energy Buff Target: ", RawAgentArray().get_name(v_target))
             else:
                 v_target = TargetLowestAlly(other_ally=True, filter_skill_id=self.skills[slot].skill_id)
         elif target_allegiance == Skilltarget.Self:
@@ -380,17 +474,16 @@ class CombatClass:
         elif target_allegiance == Skilltarget.DeadAlly:
             v_target = Routines.Agents.GetDeadAlly(Range.Spellcast.value)
         elif target_allegiance == Skilltarget.Spirit:
-            v_target = Routines.Agents.GetNearestSpirit(Range.Spellcast.value)
+            v_target = self.nearest_spirit  # Use lazy property
         elif target_allegiance == Skilltarget.Minion:
             v_target = Routines.Agents.GetLowestMinion(Range.Spellcast.value)
         elif target_allegiance == Skilltarget.Corpse:
             v_target = Routines.Agents.GetNearestCorpse(Range.Spellcast.value)
         else:
-            v_target = self.GetPartyTarget()
-            if v_target == 0:
-                v_target = nearest_enemy
+            v_target = self._cached_targets['party_target'] or self._cached_targets['nearest_enemy']
+        
         return v_target
-
+    
     def IsPartyMember(self, agent_id):
         for i in range(MAX_NUM_PLAYERS):
             player_data = self.shared_memory_handler.get_player(i)
@@ -784,7 +877,12 @@ class CombatClass:
         # Check if the skill is a shout and stance (they can be used while casting or knocked down)
         is_shout = self.skills[slot].custom_skill_data.SkillType == SkillType.Shout.value
         is_stance = self.skills[slot].custom_skill_data.SkillType == SkillType.Stance.value
+        is_chant = self.skills[slot].custom_skill_data.SkillType == SkillType.Chant.value
         is_knocked_down = Agent.IsKnockedDown(Player.GetAgentID())
+
+        if is_shout or is_chant:
+            if self.HasEffect(Player.GetAgentID(), Skill.GetID("Vocal_Minority")):
+                return False, v_target
 
         # If it's not a shout and stance, check if player is already casting
         if not is_shout and not is_stance and Agent.IsCasting(Player.GetAgentID()):
@@ -894,83 +992,133 @@ class CombatClass:
 
         return False
 
-    def ChooseTarget(self, interact=True):       
-        if not self.is_targeting_enabled:
+    def ChooseTarget(self, interact=True):
+        """Choose and interact with the best target based on priority order - Optimized version"""
+        # Return early if targeting is disabled or not in combat
+        if not self.is_targeting_enabled or not self.in_aggro:
             return False
-
-        if not self.in_aggro:
-            return False
-
-        target_id = Player.GetTargetID()
-        _, target_aliegance = Agent.GetAllegiance(target_id)
+                
+        # Initialize avoidance_system if necessary
+        if not hasattr(self, 'avoidance_system'):
+            self.avoidance_system = AvoidanceSystem()
         
-        if target_id == 0 or (target_aliegance != 'Enemy'):
-                            
-            nearest = Routines.Agents.GetNearestEnemy(self.get_combat_distance())
-            called_target = self.GetPartyTarget()
-
-            attack_target = 0
-
-            if called_target != 0:
-                attack_target = called_target
-            elif nearest != 0:
-                attack_target = nearest
-            else:
-                return False
-
-            ActionQueueManager().AddAction("ACTION", Player.ChangeTarget, attack_target)
-            ActionQueueManager().AddAction("ACTION", Player.Interact, attack_target)
+        # If the avoidance system is already active, let it manage movement
+        if self.avoidance_system.is_active:
+            self.avoidance_system.update(self.avoidance_system.target_id)
             return True
-        else:
-            
-            if not Agent.IsLiving(target_id):
-                return
-
-            _, alliegeance = Agent.GetAllegiance(target_id)
-            if alliegeance == 'Enemy' and self.is_combat_enabled:
-                if target_id != 0:
-                    ActionQueueManager().AddAction("ACTION", Player.Interact, target_id)
-                return True
+        
+        # Find the best target in one pass to save time
+        priority_targets = PriorityTargets()
+        called_target = self.GetPartyTarget()
+        nearest_enemy = Routines.Agents.GetNearestEnemy(self.get_combat_distance())
+        
+        # Check if the current priority target is still valid
+        if self.priority_target_id != 0:
+            if not Agent.IsValid(self.priority_target_id) or not Agent.IsAlive(self.priority_target_id):
+                self.priority_target_id = 0
+        
+        # Look for a new priority target if needed
+        if self.priority_target_id == 0 and priority_targets.is_enabled and priority_targets.priority_model_ids:
+            self.priority_target_id = priority_targets.find_nearest_priority_target(self.get_combat_distance())
+        
+        # Determine the best target based on priority
+        target_id = 0
+        if self.priority_target_id != 0 and Agent.IsAlive(self.priority_target_id):
+            # Priority target takes precedence if it exists and is alive
+            target_id = self.priority_target_id
+        elif called_target != 0 and Agent.IsAlive(called_target):
+            # Party called target is second priority
+            target_id = called_target
+            # If the called target is a priority target, save it
+            if priority_targets.is_priority_target(called_target):
+                self.priority_target_id = called_target
+        elif nearest_enemy != 0 and Agent.IsAlive(nearest_enemy):
+            # Nearest enemy is lowest priority
+            target_id = nearest_enemy
+            # If the nearest enemy is a priority target, save it
+            if priority_targets.is_priority_target(nearest_enemy):
+                self.priority_target_id = nearest_enemy
+        
+        # No valid target found
+        if target_id == 0:
             return False
-
-    def HandleCombat(self,ooc=False):
+        
+        # Check if target is in range for attack
+        current_pos = Player.GetXY()
+        target_pos = Agent.GetXY(target_id)
+        distance = Utils.Distance(current_pos, target_pos)
+        is_melee = Agent.IsMelee(Player.GetAgentID())
+        in_range = (is_melee and distance <= Range.Adjacent.value) or (not is_melee and distance <= Range.Spellcast.value)
+        
+        # Change target only if necessary
+        current_target = Player.GetTargetID()
+        if current_target != target_id:
+            ActionQueueManager().AddAction("ACTION", Player.ChangeTarget, target_id)
+        
+        # If in range, attack directly and update priority target
+        if in_range:
+            # Save the current target as priority if it's a priority target
+            if priority_targets.is_priority_target(target_id):
+                self.priority_target_id = target_id
+            ActionQueueManager().AddAction("ACTION", Player.Interact, target_id)
+            return True
+        
+        # If it's a priority target or party called target and out of range, use the avoidance system
+        # to navigate around obstacles
+        if target_id == self.priority_target_id or target_id == called_target:
+            # Initiate the avoidance system immediately to navigate to target
+            self.avoidance_system.find_path_around_obstacles(current_pos, target_id)
+            return True
+        
+        # For non-priority targets, simply interact
+        ActionQueueManager().AddAction("ACTION", Player.Interact, target_id)
+        return True
+                                        
+    def HandleCombat(self, ooc=False):
         """
-        tries to Execute the next skill in the skill order.
+        Tries to Execute the next skill in the skill order.
         """
-       
-        slot = self.skill_pointer
+        
+        # If we pre-calculated a next skill, try it first
+        if self._next_skill_slot is not None:
+            slot = self._next_skill_slot
+            self._next_skill_slot = None
+        else:
+            slot = self.skill_pointer
+        
         skill_id = self.skills[slot].skill_id
         
-        #Everything is already check in IsReadyToCast
-        #is_skill_ready = self.IsSkillReady(slot) 
-        #if not is_skill_ready:
-        #    self.AdvanceSkillPointer()
-        #    return False
-         
-        is_read_to_cast, target_agent_id = self.IsReadyToCast(slot)
-        if not is_read_to_cast:
+        # Quick exit checks
+        if not self.IsSkillReady(slot):
             self.AdvanceSkillPointer()
             return False
         
-        is_ooc_skill = self.IsOOCSkill(slot)
-        if ooc and not is_ooc_skill:
+        # Get all needed info in one call
+        is_ready_to_cast, target_agent_id = self.IsReadyToCast(slot)
+        
+        if not is_ready_to_cast or target_agent_id == 0:
             self.AdvanceSkillPointer()
             return False
-
-        if target_agent_id == 0:
+        
+        if ooc and not self.IsOOCSkill(slot):
             self.AdvanceSkillPointer()
             return False
-
+        
         if not Agent.IsLiving(target_agent_id):
             return False
-            
+        
+        # Save target to check if it dies during cast
+        self.target_id = target_agent_id
+        
         self.in_casting_routine = True
         self.aftercast = Skill.Data.GetActivation(skill_id) * 1000
         self.aftercast += Skill.Data.GetAftercast(skill_id) * 750
-        #self.aftercast += 150 #manually setting a 50ms delay to test issues with pinghandler
-        #self.aftercast += self.ping_handler.GetCurrentPing()
-
+        
         self.aftercast_timer.Reset()
         ActionQueueManager().AddAction("ACTION", SkillBar.UseSkill, self.skill_order[self.skill_pointer]+1, target_agent_id)
         self.AdvanceSkillPointer()
+        
+        # Pre-calculate next skill while this one is casting
+        self.GetNextSkill()
+        
         return True

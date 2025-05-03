@@ -14,29 +14,27 @@ def GetAllAlliesArray(distance=Range.SafeCompass.value):
     spirit_pet_array = AgentArray.GetSpiritPetArray()
     spirit_pet_array = AgentArray.Filter.ByDistance(spirit_pet_array, Player.GetXY(), distance)
     spirit_pet_array = AgentArray.Filter.ByCondition(spirit_pet_array, lambda agent_id: not Agent.IsSpawned(agent_id)) #filter spirits
-    ally_array = AgentArray.Manipulation.Merge(ally_array, spirit_pet_array) #added Pets
     
-    """
-    npc_array = AgentArray.GetNPCMinipetArray()
-    npc_array = AgentArray.Filter.ByDistance(npc_array, Player.GetXY(), distance)
-    npc_array = AgentArray.Filter.ByCondition(npc_array, lambda agent_id: Agent.GetLevel(agent_id) > 1) #filter minipets
-    ally_array = AgentArray.Manipulation.Merge(ally_array, npc_array) #added NPCs
-    """
-    
-    return ally_array   
+    # Use list comprehension for merging
+    return [*ally_array, *spirit_pet_array]
 
 def FilterAllyArray(array, distance, other_ally=False, filter_skill_id=0):
     from .utils import CheckForEffect
-    array = AgentArray.Filter.ByDistance(array, Player.GetXY(), distance)
-    array = AgentArray.Filter.ByCondition(array, lambda agent_id: Agent.IsAlive(agent_id))
-        
+    
+    # Chain filters efficiently
+    filtered = [agent_id for agent_id in array 
+                if Utils.Distance(Player.GetXY(), Agent.GetXY(agent_id)) <= distance 
+                and Agent.IsAlive(agent_id)]
+    
     if other_ally:
-        array = AgentArray.Filter.ByCondition(array, lambda agent_id: Player.GetAgentID() != agent_id)
+        filtered = [agent_id for agent_id in filtered 
+                   if Player.GetAgentID() != agent_id]
     
     if filter_skill_id != 0:
-        array = AgentArray.Filter.ByCondition(array, lambda agent_id: not CheckForEffect(agent_id, filter_skill_id))
+        filtered = [agent_id for agent_id in filtered 
+                   if not CheckForEffect(agent_id, filter_skill_id)]
     
-    return array
+    return filtered
 
 def TargetLowestAlly(other_ally=False,filter_skill_id=0):
     distance = Range.Spellcast.value

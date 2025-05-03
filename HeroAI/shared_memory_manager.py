@@ -222,6 +222,42 @@ class SharedMemoryManager:
         except Exception as e:
             Py4GW.Console.Log(SMM_MODULE_NAME, f"Write failed for property {property_name} at index {player_index}: {e}", Py4GW.Console.MessageType.Error)
 
+    def batch_update_player_properties(self, player_index, properties_dict):
+        """Update multiple player properties in one operation"""
+        try:
+            if player_index < 0 or player_index >= self.num_players:
+                raise IndexError("Invalid player index.")
+            
+            player = self.game_struct.Players[player_index]
+            
+            for prop_name, value in properties_dict.items():
+                if hasattr(player, prop_name):
+                    setattr(player, prop_name, value)
+            
+            player.LastUpdated = get_base_timestamp()
+        
+        except Exception as e:
+            Py4GW.Console.Log(SMM_MODULE_NAME, f"Batch update failed: {e}", Py4GW.Console.MessageType.Error)
+    
+    def batch_get_player_properties(self, player_index, property_names):
+        """Get multiple player properties in one operation"""
+        try:
+            if player_index < 0 or player_index >= self.num_players:
+                raise IndexError("Invalid player index.")
+            
+            player = self.game_struct.Players[player_index]
+            result = {}
+            
+            for prop_name in property_names:
+                if hasattr(player, prop_name):
+                    result[prop_name] = getattr(player, prop_name)
+            
+            return result
+        
+        except Exception as e:
+            Py4GW.Console.Log(SMM_MODULE_NAME, f"Batch get failed: {e}", Py4GW.Console.MessageType.Error)
+            return None
+
     def get_player(self, index):
         """Read player data and timeout check."""
         try:
@@ -489,5 +525,4 @@ class SharedMemoryManager:
         
     def close(self):
         """Close this process's reference to shared memory."""
-        self.shm.close()  
-
+        self.shm.close()

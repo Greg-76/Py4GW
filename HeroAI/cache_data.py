@@ -79,11 +79,27 @@ class GameData:
         self.is_skill_enabled = [True for _ in range(NUMBER_OF_SKILLS)]
         self.RAW_AGENT_ARRAY = RawAgentArray(100)
         
-        
+        # Agent array caching
+        self._enemy_array_cache = None
+        self._enemy_cache_timer = Timer()
+        self._enemy_cache_timer.Start()
+                
     def reset(self):
         self.__init__()
         
-    def update(self):
+    def update_critical(self):
+        """Update only critical data needed every frame"""
+        self.player_agent_id = Player.GetAgentID()
+        self.player_xy = Agent.GetXY(self.player_agent_id)
+        self.player_is_casting = Agent.IsCasting(self.player_agent_id)
+        self.player_is_moving = Agent.IsMoving(self.player_agent_id)
+        self.player_is_alive = Agent.IsAlive(self.player_agent_id)
+        self.player_is_knocked_down = Agent.IsKnockedDown(self.player_agent_id)
+        self.target_id = Player.GetTargetID()
+        self.in_aggro = self.update_aggro_state()
+        
+    def update_full(self):
+        """Full update of all data"""
         #Map data
         self.is_map_ready = Map.IsMapReady()
         if not self.is_map_ready:
@@ -134,8 +150,19 @@ class GameData:
         self.target_id = Player.GetTargetID()
         if self.is_outpost:
             self.RAW_AGENT_ARRAY.update() 
-        
     
+    def update_aggro_state(self):
+        """Efficient aggro state update with caching"""
+        # Update enemy array cache if needed
+        if self._enemy_array_cache is None or self._enemy_cache_timer.HasElapsed(50):
+            self._enemy_array_cache = AgentArray.GetEnemyArray()
+            self._enemy_cache_timer.Reset()
+        
+        enemy_array = self._enemy_array_cache
+        enemy_array = AgentArray.Filter.ByDistance(enemy_array, self.player_xy, Range.Earshot.value)
+        enemy_array = AgentArray.Filter.ByCondition(enemy_array, lambda agent_id: Agent.IsAlive(agent_id))
+        return len(enemy_array) > 0 
+        
 @dataclass
 class UIStateData:
     def __init__(self):
@@ -155,6 +182,7 @@ class CacheData:
             self.HeroAI_vars = HeroAI_varsClass()
             self.HeroAI_windows = HeroAI_Window_varsClass()
             self.game_throttle_time = throttle_time
+            self.combat_throttle_time = 25  # Faster updates during combat
             self.game_throttle_timer = Timer()
             self.game_throttle_timer.Start()
             self.shared_memory_timer = Timer()
@@ -165,7 +193,7 @@ class CacheData:
             self.data = GameData()
             self.auto_attack_timer = Timer()
             self.auto_attack_timer.Start()
-            self.auto_attack_time = 750
+            self.auto_attack_time = 100
             self.draw_floating_loot_buttons = False
             self.reset()
             self.ui_state_data = UIStateData()
@@ -201,24 +229,32 @@ class CacheData:
         
     def Update(self):
         try:
-            if self.game_throttle_timer.HasElapsed(self.game_throttle_time):
-                self.game_throttle_timer.Reset()
-                self.data.reset()
-                self.data.update()
-                
-                if self.stay_alert_timer.HasElapsed(STAY_ALERT_TIME):
-                    self.data.in_aggro = self.InAggro(AgentArray.GetEnemyArray(), Range.Earshot.value)
-                else:
-                    self.data.in_aggro = self.InAggro(AgentArray.GetEnemyArray(), Range.Spellcast.value)
-                    
-                if self.data.in_aggro:
-                    self.stay_alert_timer.Reset()
-                    
-                if not self.stay_alert_timer.HasElapsed(STAY_ALERT_TIME):
-                    self.data.in_aggro = True
-                
-        except Exception as e:
-            ConsoleLog(f"Update Cahe Data Error:", e)
-                       
+            # Always update critical data
+            self.data.update_critical()
             
-                     
+            # Adjust throttle time based on combat state
+            current_throttle = self.combat_throttle_time if self.data.in_aggro else self.game_throttle_time
+            
+            if self.game_throttle_timer.HasElapsed(current_throttle):
+                self.game_throttle_timer.Reset()
+                
+                # Only do full update if not in action
+                if not self.data.player_is_moving and not self.data.player_is_casting:
+                    self.data.reset()
+                    self.data.update_full()
+                    
+                    # Variable combat state update
+                    alert_range = Range.Earshot.value
+                    if not self.stay_alert_timer.HasElapsed(STAY_ALERT_TIME):
+                        alert_range = Range.Spellcast.value
+                        
+                    self.data.in_aggro = self.InAggro(AgentArray.GetEnemyArray(), alert_range)
+                        
+                    if self.data.in_aggro:
+                        self.stay_alert_timer.Reset()
+                        
+                    if not self.stay_alert_timer.HasElapsed(STAY_ALERT_TIME):
+                        self.data.in_aggro = True
+                    
+        except Exception as e:
+            ConsoleLog(f"Update Cache Data Error:", e)

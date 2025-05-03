@@ -12,10 +12,12 @@ from HeroAI.windows import *
 from HeroAI.targeting import *
 from HeroAI.combat import *
 from HeroAI.cache_data import *
+from HeroAI.enhanced_priority_targets import EnhancedPriorityTargets
 
 MODULE_NAME = "HeroAI"
 
 cached_data = CacheData()
+enhanced_priority_targets = EnhancedPriorityTargets()
 
 def HandleOutOfCombat(cached_data:CacheData):
     if not cached_data.data.is_combat_enabled:  # halt operation if combat is disabled
@@ -25,8 +27,6 @@ def HandleOutOfCombat(cached_data:CacheData):
 
     return cached_data.combat_handler.HandleCombat(ooc= True)
 
-
-
 def HandleCombat(cached_data:CacheData):
     if not cached_data.data.is_combat_enabled:  # halt operation if combat is disabled
         return False
@@ -35,12 +35,10 @@ def HandleCombat(cached_data:CacheData):
 
     return cached_data.combat_handler.HandleCombat(ooc= False)
 
-
 thread_manager = MultiThreading(log_actions=True)
 in_looting_routine = False
 looting_aftercast = Timer()
 looting_aftercast.Start()
-
 
 def SequentialLootingRoutine():
     global in_looting_routine, looting_aftercast
@@ -51,8 +49,6 @@ def SequentialLootingRoutine():
     Routines.Sequential.Items.LootItems(filtered_loot,log = False)
     looting_aftercast.Reset()
     in_looting_routine = False
-
-
 
 def Loot(cached_data:CacheData):
     global in_looting_routine, looting_aftercast
@@ -75,8 +71,6 @@ def Loot(cached_data:CacheData):
     in_looting_routine = True
     thread_manager.stop_thread("SequentialLootingRoutine")
     thread_manager.add_thread("SequentialLootingRoutine", SequentialLootingRoutine)
-
-
 
 def Follow(cached_data:CacheData):
     global MELEE_RANGE_VALUE, RANGED_RANGE_VALUE, FOLLOW_DISTANCE_ON_COMBAT
@@ -128,9 +122,6 @@ def Follow(cached_data:CacheData):
     hero_grid_pos = party_number + cached_data.data.party_hero_count + cached_data.data.party_henchman_count
     angle_on_hero_grid = follow_angle + Utils.DegToRad(hero_formation[hero_grid_pos])
 
-    #if IsPointValid(follow_x, follow_y):
-    #   return False
-
     xx = Range.Touch.value * math.cos(angle_on_hero_grid) + follow_x
     yy = Range.Touch.value * math.sin(angle_on_hero_grid) + follow_y
 
@@ -138,8 +129,6 @@ def Follow(cached_data:CacheData):
     ActionQueueManager().ResetQueue("ACTION")
     ActionQueueManager().AddAction("ACTION", Player.Move, xx, yy)
     return True
-    
-
 
 def draw_Targeting_floating_buttons(cached_data:CacheData):
     if not Map.IsExplorable():
@@ -154,19 +143,21 @@ def draw_Targeting_floating_buttons(cached_data:CacheData):
         screen_x,screen_y = Overlay.WorldToScreen(x,y,z+25)
         if ImGui.floating_button(f"{IconsFontAwesome5.ICON_BULLSEYE}##fb_{agent_id}",screen_x,screen_y):
             ActionQueueManager().ResetQueue("ACTION")
-            ActionQueueManager().AddAction("ACTION", Player.ChangeTarget, agent_id)
+            current_target = Player.GetTargetID()
+            if current_target != agent_id:
+                ActionQueueManager().AddAction("ACTION", Player.ChangeTarget, agent_id)
             ActionQueueManager().AddAction("ACTION", Player.Interact, agent_id, True)
             ActionQueueManager().AddAction("ACTION", Keystroke.PressAndReleaseCombo, [Key.Ctrl.value, Key.Space.value])
 
-      
 #TabType 
 class TabType(Enum):
     party = 1
     control_panel = 2
     candidates = 3
     flagging = 4
-    config = 5
-    debug = 6 
+    priority_targets = 5
+    config = 6
+    debug = 7 
     
 selected_tab:TabType = TabType.party
 
@@ -218,16 +209,17 @@ def DrawFramedContent(cached_data:CacheData,content_frame_id):
                 DrawCandidateWindow(cached_data)
             case TabType.flagging:
                 DrawFlaggingWindow(cached_data)
+            case TabType.priority_targets:
+                DrawPriorityTargetsWindow(cached_data)
             case TabType.config:
                 DrawOptions(cached_data)
 
-        
     PyImGui.end()
     PyImGui.pop_style_var(1)
-    
-       
+              
 def DrawEmbeddedWindow(cached_data:CacheData):
     global selected_tab
+    
     parent_frame_id = UIManager.GetFrameIDByHash(PARTY_WINDOW_HASH)   
     outpost_content_frame_id = UIManager.GetChildFrameID( PARTY_WINDOW_HASH, PARTY_WINDOW_FRAME_OUTPOST_OFFSETS)
     explorable_content_frame_id = UIManager.GetChildFrameID( PARTY_WINDOW_HASH, PARTY_WINDOW_FRAME_EXPLORABLE_OFFSETS)
@@ -265,6 +257,10 @@ def DrawEmbeddedWindow(cached_data:CacheData):
                 selected_tab = TabType.flagging
                 PyImGui.end_tab_item()
             ImGui.show_tooltip("Flagging")
+            if PyImGui.begin_tab_item(IconsFontAwesome5.ICON_CROSSHAIRS + "##priorityTargetsTab"):
+                selected_tab = TabType.priority_targets
+                PyImGui.end_tab_item()
+            ImGui.show_tooltip("Priority Targets")
             if PyImGui.begin_tab_item(IconsFontAwesome5.ICON_COGS + "##configTab"):
                 selected_tab = TabType.config
                 PyImGui.end_tab_item()
@@ -278,8 +274,6 @@ def DrawEmbeddedWindow(cached_data:CacheData):
     
     ImGui.PopTransparentWindow()    
     DrawFramedContent(cached_data,content_frame_id)
-    
-    
 
 def UpdateStatus(cached_data:CacheData):
     global in_looting_routine
@@ -290,8 +284,9 @@ def UpdateStatus(cached_data:CacheData):
     RegisterPlayer(cached_data)   
     RegisterHeroes(cached_data)
     UpdatePlayers(cached_data)      
-    UpdateGameOptions(cached_data)   
-    
+    UpdateGameOptions(cached_data)
+    enhanced_priority_targets.update()
+   
     cached_data.UpdateGameOptions()
 
     DrawEmbeddedWindow(cached_data)
@@ -306,17 +301,13 @@ def UpdateStatus(cached_data:CacheData):
     if cached_data.data.is_in_cinematic:  # halt operation during cinematic
         return
 
-
     DrawFlags(cached_data)
     
     draw_Targeting_floating_buttons(cached_data)
     
     if (
         not cached_data.data.player_is_alive or
-        DistanceFromLeader(cached_data) >= Range.SafeCompass.value or
-        cached_data.data.player_is_knocked_down or 
-        cached_data.combat_handler.InCastingRoutine() or 
-        cached_data.data.player_is_casting
+        DistanceFromLeader(cached_data) >= Range.SafeCompass.value
     ):
         return
     
@@ -345,27 +336,47 @@ def UpdateStatus(cached_data:CacheData):
         if cached_data.data.is_combat_enabled and not cached_data.data.player_is_attacking:
             cached_data.combat_handler.ChooseTarget()
         cached_data.auto_attack_timer.Reset()
-    
 
-   
 def configure():
     pass
-
 
 def main():
     global cached_data
     try:
+        # Quick validity check
         if not Routines.Checks.Map.MapValid():
             ActionQueueManager().ResetQueue("ACTION")
             return
         
-        cached_data.Update()
-        if cached_data.data.is_map_ready and cached_data.data.is_party_loaded:
+        # Critical data update only
+        cached_data.data.update_critical()
+        
+        # Check basic requirements early
+        if not (Map.IsMapReady() and Party.IsPartyLoaded()):
+            return
+        
+        # Process actions is priority
+        ActionQueueManager().ProcessQueue("ACTION")
+        
+        # Quick combat state check
+        in_casting_routine = cached_data.combat_handler.InCastingRoutine()
+        
+        # Only do full update when necessary
+        if not in_casting_routine or not cached_data.combat_handler.in_casting_routine:
+            cached_data.Update()
             UpdateStatus(cached_data)
-            ActionQueueManager().ProcessQueue("ACTION")
-
-
+        else:
+            # Minimal update during combat
+            if not cached_data.data.player_is_alive:
+                cached_data.combat_handler.in_casting_routine = False
+                return
             
+            # Check if target died during casting
+            if not cached_data.combat_handler.InCastingRoutine():
+                # Force immediate update if we exited routine
+                cached_data.Update()
+                UpdateStatus(cached_data)
+    
     except ImportError as e:
         Py4GW.Console.Log(MODULE_NAME, f"ImportError encountered: {str(e)}", Py4GW.Console.MessageType.Error)
         Py4GW.Console.Log(MODULE_NAME, f"Stack trace: {traceback.format_exc()}", Py4GW.Console.MessageType.Error)
@@ -381,8 +392,6 @@ def main():
         Py4GW.Console.Log(MODULE_NAME, f"Stack trace: {traceback.format_exc()}", Py4GW.Console.MessageType.Error)
     finally:
         pass
-        
 
 if __name__ == "__main__":
     main()
-
