@@ -1029,6 +1029,69 @@
         "drop_info": "MODELID NOT AQUIRED!!! Dropped by Blood Drinker, Rhythm Drinker in Echovald Forest - Factions"
     },
     {
+        "name": "Celestial Essence",
+        "model_id": "ModelID.Celestial_Essence",
+        "group": "Trophies",
+        "subgroup": "C",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Charr Carving",
+        "model_id": "ModelID.Charr_Carving",
+        "group": "Trophies",
+        "subgroup": "C",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Chromatic Scale",
+        "model_id": "ModelID.Chromatic_Scale",
+        "group": "Trophies",
+        "subgroup": "C",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Chunk Of Drake Flesh",
+        "model_id": "ModelID.Chunk_Of_Drake_Flesh",
+        "group": "Trophies",
+        "subgroup": "C",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Cobalt Talon",
+        "model_id": "ModelID.Cobalt_Talon",
+        "group": "Trophies",
+        "subgroup": "C",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Copper Chrimson Skull Coin",
+        "model_id": "ModelID.Copper_Chrimson_Skull_Coin",
+        "group": "Trophies",
+        "subgroup": "C",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Copper Shilling",
+        "model_id": "ModelID.Copper_Shilling",
+        "group": "Trophies",
+        "subgroup": "C",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Corrosive Spider Leg",
+        "model_id": "ModelID.Corrosive_Spider_Leg",
+        "group": "Trophies",
+        "subgroup": "C",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Curved Mintaur Horn",
+        "model_id": "ModelID.Curved_Mintaur_Horn",
+        "group": "Trophies",
+        "subgroup": "C",
+        "drop_info": "Dropped by data to be added"
+    },  
+    {
         "name": "Dark Claw",
         "model_id": "ModelID.Dark_Claw",
         "group": "Trophies",
@@ -2107,6 +2170,153 @@
         "drop_info": "Dropped by data to be added"
     },
     {
+        "name": "Tangled Seed",
+        "model_id": "ModelID.Tangled_Seed",
+        "group": "Trophies",
+        "subgroup": "T",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Thorny Carapace",
+        "model_id": "ModelID.Thorny_Carapace",
+        "group": "Trophies",
+        "subgroup": "T",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Topaz Crest",
+        "model_id": "ModelID.Topaz_Crest",
+        "group": "Trophies",
+        "subgroup": "T",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Truffle",
+        "model_id": "ModelID.Truffle",
+        "group": "Trophies",
+        "subgroup": "T",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Umbral Eye",
+        "model_id": "ModelID.Umbral_Eye",
+        "group": "Trophies",
+        "subgroup": "U",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Umbral Shell",
+        "model_id": "ModelID.Umbral_Shell",
+        "group": "Trophies",
+        "subgroup": "U",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Umbral Skeletal Limb",
+        "model_id": "ModelID.Umbral_Skeletal_Limb",
+        "group": "Trophies",
+        "subgroup": "U",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Unctuous Remains",
+        "model_id": "ModelID.Unctuous_Remains",
+        "group": "Trophies",
+        "subgroup": "U",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Undead Bone",
+        "model_id": "ModelID.Undead_Bone",
+        "group": "Trophies",
+        "subgroup": "U",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Unnatural Seed",
+        "model_id": "ModelID.Unnatural_Seed",
+        "group": "Trophies",
+        "subgroup": "U",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Vaettir Essence",
+        "model_id": "ModelID.Vaettir_Essence",
+        "group": "Trophies",
+        "subgroup": "V",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Vampiric Fang",
+        "model_id": "ModelID.Vampiric_Fang",
+        "group": "Trophies",
+        "subgroup": "V",
+        "drop_info": "Dropped in Urgoz's Warren by Hopping Vampire & Thought Stealer"
+    },
+    {
+        "name": "Venerable Mantid Pincer",
+        "model_id": "ModelID.Venerable_Mantid_Pincer",
+        "group": "Trophies",
+        "subgroup": "V",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Vermin Hide",
+        "model_id": "ModelID.Vermin_Hide",
+        "group": "Trophies",
+        "subgroup": "V",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "War Supplies",
+        "model_id": "ModelID.War_Supplies",
+        "group": "Trophies",
+        "subgroup": "W",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Warden Horn",
+        "model_id": "ModelID.Warden_Horn",
+        "group": "Trophies",
+        "subgroup": "W",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Water Djinn Essence",
+        "model_id": "ModelID.Water_Djinn_Essence",
+        "group": "Trophies",
+        "subgroup": "W",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Weaver Leg",
+        "model_id": "ModelID.Weaver_Leg",
+        "group": "Trophies",
+        "subgroup": "W",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "White Mantle Badge",
+        "model_id": "ModelID.White_Mantle_Badge",
+        "group": "Trophies",
+        "subgroup": "W",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "White Mantle Emblem",
+        "model_id": "ModelID.White_Mantle_Emblem",
+        "group": "Trophies",
+        "subgroup": "W",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Worn Belt",
+        "model_id": "ModelID.Worn_Belt",
+        "group": "Trophies",
+        "subgroup": "W",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
         "name": "Confessors Orders",
         "model_id": "ModelID.Confessors_Orders",
         "group": "Reward Trophies",
@@ -2203,5 +2413,33 @@
         "group": "Reward Trophies",
         "subgroup": "Special Events",
         "drop_info": "Dropped during In Grenth's Defense and You're a Mean One, Mr. Grenth"
+    },
+    {
+        "name": "Map Piece (Bottom-Left)",
+        "model_id": "ModelID.Map_Piece_Bl",
+        "group": "Quest Items",
+        "subgroup": "Map Pieces",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Map Piece (Bottom-Right)",
+        "model_id": "ModelID.Map_Piece_Br",
+        "group": "Quest Items",
+        "subgroup": "Map Pieces",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Map Piece (Top-Left)",
+        "model_id": "ModelID.Map_Piece_Tl",
+        "group": "Quest Items",
+        "subgroup": "Map Pieces",
+        "drop_info": "Dropped by data to be added"
+    },
+    {
+        "name": "Map Piece (Top-Right)",
+        "model_id": "ModelID.Map_Piece_Tr",
+        "group": "Quest Items",
+        "subgroup": "Map Pieces",
+        "drop_info": "Dropped by data to be added"
     }
 ]

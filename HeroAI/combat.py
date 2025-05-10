@@ -2,9 +2,8 @@ from Py4GWCoreLib import *
 from .custom_skill import *
 from .types import *
 from .targeting import *
-from .avoidance_system import AvoidanceSystem
-from .priority_targets import PriorityTargets
 from typing import Optional
+
 
 MAX_SKILLS = 8
 custom_skill_data_handler = CustomSkillClass()
@@ -92,8 +91,6 @@ class CombatClass:
         self.is_targeting_enabled = False
         self.is_combat_enabled = False
         self.is_skill_enabled = []
-
-        self.priority_target_id = 0
         
         self.nearest_enemy = Routines.Agents.GetNearestEnemy(self.get_combat_distance())
         self.lowest_ally = TargetLowestAlly()
@@ -156,6 +153,7 @@ class CombatClass:
         self.is_combat_enabled = cached_data.is_combat_enabled
         self.is_skill_enabled = cached_data.is_skill_enabled
         
+
     def PrioritizeSkills(self):
         """
         Create a priority-based skill execution order.
@@ -242,12 +240,14 @@ class CombatClass:
         
         self.skills = ordered_skills
         
+        
     def GetSkills(self):
         """
         Retrieve the prioritized skill set.
         """
         return self.skills
         
+
     def GetOrderedSkill(self, index:int)-> Optional[SkillData]:
         """
         Retrieve the skill at the given index in the prioritized order.
@@ -260,6 +260,9 @@ class CombatClass:
         self.skill_pointer += 1
         if self.skill_pointer >= MAX_SKILLS:
             self.skill_pointer = 0
+            
+    def ResetSkillPointer(self):
+        self.skill_pointer = 0
             
     def GetEnergyValues(self,agent_id):
         for i in range(MAX_NUM_PLAYERS):
@@ -295,10 +298,19 @@ class CombatClass:
         players = Party.GetPlayers()
         target = players[0].called_target_id
 
-        if target is None or target == 0:
-            return 0
-        else:
-            return target   
+        if Agent.IsValid(target):
+            return target  
+        
+        return 0 
+
+    def SafeChangeTarget(self, target_id):
+        if Agent.IsValid(target_id):
+            Player.ChangeTarget(target_id)
+            
+    def SafeInteract(self, target_id):
+        if Agent.IsValid(target_id):
+            Player.Interact(target_id)
+
 
     def GetPartyTarget(self):
         party_target = self.GetPartyTargetID()
@@ -308,9 +320,7 @@ class CombatClass:
                 if Agent.IsLiving(party_target):
                     _, alliegeance = Agent.GetAllegiance(party_target)
                     if alliegeance != 'Ally' and alliegeance != 'NPC/Minipet' and self.is_combat_enabled:
-                        current_target = Player.GetTargetID()
-                        if current_target != party_target:
-                            ActionQueueManager().AddAction("ACTION", Player.ChangeTarget, party_target)
+                        ActionQueueManager().AddAction("ACTION", self.SafeChangeTarget, party_target)
                         return party_target
         return 0
 
@@ -335,12 +345,9 @@ class CombatClass:
                 return Player.GetAgentID()
 
         if target_allegiance == Skilltarget.Enemy:
-            if self.priority_target_id != 0 and Agent.IsAlive(self.priority_target_id):
-                v_target = self.priority_target_id
-            else:
-                v_target = self.GetPartyTarget()
-                if v_target == 0:
-                    v_target = nearest_enemy
+            v_target = self.GetPartyTarget()
+            if v_target == 0:
+                v_target = nearest_enemy
         elif target_allegiance == Skilltarget.EnemyCaster:
             v_target = Routines.Agents.GetNearestEnemyCaster(self.get_combat_distance())
             if v_target == 0 and not targeting_strict:
@@ -433,6 +440,7 @@ class CombatClass:
                result = Agent.IsWeaponSpelled(agent_id)
 
         return result
+
 
     def AreCastConditionsMet(self, slot, vTarget):
         number_of_features = 0
@@ -764,6 +772,7 @@ class CombatClass:
 
         return False
 
+
     def SpiritBuffExists(self, skill_id):
         spirit_array = AgentArray.GetSpiritPetArray()
         distance = Range.Earshot.value
@@ -782,45 +791,29 @@ class CombatClass:
 
         return False
 
+
+
     def IsReadyToCast(self, slot):
-        # Validate target
+        # Check if the player is already casting
+         # Validate target
         v_target = self.GetAppropiateTarget(slot)
         if v_target is None or v_target == 0:
             self.in_casting_routine = False
             return False, 0
 
-        # Check if the skill is a shout and stance (they can be used while casting or knocked down)
-        is_shout = self.skills[slot].custom_skill_data.SkillType == SkillType.Shout.value
-        is_stance = self.skills[slot].custom_skill_data.SkillType == SkillType.Stance.value
-        is_chant = self.skills[slot].custom_skill_data.SkillType == SkillType.Chant.value
-        is_knocked_down = Agent.IsKnockedDown(Player.GetAgentID())
-
-        if is_shout or is_chant:
-            if self.HasEffect(Player.GetAgentID(), Skill.GetID("Vocal_Minority")):
-                return False, v_target
-
-        # If it's not a shout and stance, check if player is already casting
-        if not is_shout and not is_stance and Agent.IsCasting(Player.GetAgentID()):
+        if Agent.IsCasting(Player.GetAgentID()):
             self.in_casting_routine = False
             return False, v_target
-            
-        if not is_shout and not is_stance and Agent.GetCastingSkill(Player.GetAgentID()) != 0:
+        if Agent.GetCastingSkill(Player.GetAgentID()) != 0:
             self.in_casting_routine = False
             return False, v_target
-            
-        if not is_shout and not is_stance and SkillBar.GetCasting() != 0:
+        if SkillBar.GetCasting() != 0:
             self.in_casting_routine = False
             return False, v_target
-        
-        if not is_shout and not is_stance and is_knocked_down != 0:
-            self.in_casting_routine = False
-            return False, v_target
-            
         # Check if no skill is assigned to the slot
         if self.skills[slot].skill_id == 0:
             self.in_casting_routine = False
             return False, v_target
-            
         # Check if the skill is recharging
         if self.skills[slot].skillbar_data.recharge != 0:
             self.in_casting_routine = False
@@ -828,10 +821,10 @@ class CombatClass:
         
         # Check if there is enough energy
         current_energy = self.GetEnergyValues(Player.GetAgentID()) * Agent.GetMaxEnergy(Player.GetAgentID())
-        if current_energy < Routines.Checks.Skills.GetEnergyCostWithEffects(self.skills[slot].skill_id, Player.GetAgentID()):  
+        if current_energy < Routines.Checks.Skills.GetEnergyCostWithEffects(self.skills[slot].skill_id,Player.GetAgentID()):  
+        #if current_energy < Skill.Data.GetEnergyCost(self.skills[slot].skill_id):
             self.in_casting_routine = False
             return False, v_target
-            
         # Check if there is enough health
         current_hp = Agent.GetHealth(Player.GetAgentID())
         target_hp = self.skills[slot].custom_skill_data.Conditions.SacrificeHealth
@@ -839,13 +832,13 @@ class CombatClass:
         if (current_hp < target_hp) and health_cost > 0:
             self.in_casting_routine = False
             return False, v_target
-    
+     
         # Check if there is enough adrenaline
         adrenaline_required = Skill.Data.GetAdrenaline(self.skills[slot].skill_id)
         if adrenaline_required > 0 and self.skills[slot].skillbar_data.adrenaline_a < adrenaline_required:
             self.in_casting_routine = False
             return False, v_target
-        
+
         """
         # Check overcast conditions
         current_overcast = Agent.GetOvercast(Player.GetAgentID())
@@ -855,7 +848,7 @@ class CombatClass:
             self.in_casting_routine = False
             return False, 0
         """
-
+                
         # Check combo conditions
         combo_type = Skill.Data.GetCombo(self.skills[slot].skill_id)
         dagger_status = Agent.GetDaggerStatus(v_target)
@@ -873,10 +866,8 @@ class CombatClass:
         if self.SpiritBuffExists(self.skills[slot].skill_id):
             self.in_casting_routine = False
             return False, v_target
-        
-        # Check if need to use when effect is already active
-        ignore_effect = getattr(self.skills[slot].custom_skill_data.Conditions, "IgnoreEffectCheck", False)
-        if self.HasEffect(v_target, self.skills[slot].skill_id) and not ignore_effect:
+
+        if self.HasEffect(v_target,self.skills[slot].skill_id):
             self.in_casting_routine = False
             return False, v_target
         
@@ -888,12 +879,6 @@ class CombatClass:
 
         skill_type = self.skills[slot].custom_skill_data.SkillType
         skill_nature = self.skills[slot].custom_skill_data.Nature
-
-        #Don't use Chant or Stance when Out Of Combat
-        if(skill_type == SkillType.Chant.value or 
-           skill_type == SkillType.Stance.value
-        ):
-            return False
 
         if(skill_type == SkillType.Form.value or
            skill_type == SkillType.Preparation.value or
@@ -907,89 +892,38 @@ class CombatClass:
 
         return False
 
-    def ChooseTarget(self, interact=True):
-        """Choose and interact with the best target based on priority order - Optimized version"""
-        # Return early if targeting is disabled or not in combat
-        if not self.is_targeting_enabled or not self.in_aggro:
+    def ChooseTarget(self, interact=True):       
+        if not self.is_targeting_enabled:
             return False
-                
-        # Initialize avoidance_system if necessary
-        if not hasattr(self, 'avoidance_system'):
-            self.avoidance_system = AvoidanceSystem()
-        
-        # If the avoidance system is already active, let it manage movement
-        if self.avoidance_system.is_active:
-            self.avoidance_system.update(self.avoidance_system.target_id)
-            return True
-        
-        # Find the best target in one pass to save time
-        priority_targets = PriorityTargets()
-        called_target = self.GetPartyTarget()
-        nearest_enemy = Routines.Agents.GetNearestEnemy(self.get_combat_distance())
-        
-        # Check if the current priority target is still valid
-        if self.priority_target_id != 0:
-            if not Agent.IsValid(self.priority_target_id) or not Agent.IsAlive(self.priority_target_id):
-                self.priority_target_id = 0
-        
-        # Look for a new priority target if needed
-        character_name = priority_targets.get_character_name()
-        if priority_targets.is_enabled(character_name) and priority_targets.get_model_ids(character_name):
-            self.priority_target_id = priority_targets.find_nearest_priority_target(self.get_combat_distance())
-        
-        # Determine the best target based on priority
-        target_id = 0
-        if self.priority_target_id != 0 and Agent.IsAlive(self.priority_target_id):
-            # Priority target takes precedence if it exists and is alive
-            target_id = self.priority_target_id
-        elif called_target != 0 and Agent.IsAlive(called_target):
-            # Party called target is second priority
-            target_id = called_target
-            # If the called target is a priority target, save it
-            if priority_targets.is_priority_target(called_target):
-                self.priority_target_id = called_target
-        elif nearest_enemy != 0 and Agent.IsAlive(nearest_enemy):
-            # Nearest enemy is lowest priority
-            target_id = nearest_enemy
-            # If the nearest enemy is a priority target, save it
-            if priority_targets.is_priority_target(nearest_enemy):
-                self.priority_target_id = nearest_enemy
-        
-        # No valid target found
-        if target_id == 0:
+
+        if not self.in_aggro:
             return False
+
+        target_id = Player.GetTargetID()
+        if Agent.IsValid(target_id) or target_id == 0:
+            _, target_aliegance = Agent.GetAllegiance(target_id)
         
-        # Check if target is in range for attack
-        current_pos = Player.GetXY()
-        target_pos = Agent.GetXY(target_id)
-        distance = Utils.Distance(current_pos, target_pos)
-        is_melee = Agent.IsMelee(Player.GetAgentID())
-        in_range = (is_melee and distance <= Range.Adjacent.value) or (not is_melee and distance <= Range.Spellcast.value)
-        
-        # Change target only if necessary
-        current_target = Player.GetTargetID()
-        if current_target != target_id:
-            ActionQueueManager().AddAction("ACTION", Player.ChangeTarget, target_id)
-        
-        # If in range, attack directly and update priority target
-        if in_range:
-            # Save the current target as priority if it's a priority target
-            if priority_targets.is_priority_target(target_id):
-                self.priority_target_id = target_id
-            ActionQueueManager().AddAction("ACTION", Player.Interact, target_id)
-            return True
-        
-        # If it's a priority target or party called target and out of range, use the avoidance system
-        # to navigate around obstacles
-        if target_id == self.priority_target_id or target_id == called_target:
-            # Initiate the avoidance system immediately to navigate to target
-            self.avoidance_system.find_path_around_obstacles(current_pos, target_id)
-            return True
-        
-        # For non-priority targets, simply interact
-        ActionQueueManager().AddAction("ACTION", Player.Interact, target_id)
-        return True
-                                        
+            if target_aliegance != 'Enemy' or target_id == 0:      
+                nearest = Routines.Agents.GetNearestEnemy(self.get_combat_distance())
+                called_target = self.GetPartyTarget()
+
+                attack_target = 0
+
+                if Agent.IsValid(called_target):
+                    attack_target = called_target
+                elif Agent.IsValid(nearest):
+                    attack_target = nearest
+                else:
+                    return False
+
+                ActionQueueManager().AddAction("ACTION", self.SafeChangeTarget, attack_target)
+                ActionQueueManager().AddAction("ACTION", self.SafeInteract, attack_target)
+                return True
+            else:
+                ActionQueueManager().AddAction("ACTION", self.SafeInteract, target_id)
+                return True
+        return False
+
     def HandleCombat(self,ooc=False):
         """
         tries to Execute the next skill in the skill order.
@@ -998,17 +932,21 @@ class CombatClass:
         slot = self.skill_pointer
         skill_id = self.skills[slot].skill_id
         
-        is_skill_ready = self.IsSkillReady(slot) 
+        is_skill_ready = self.IsSkillReady(slot)
+            
         if not is_skill_ready:
             self.AdvanceSkillPointer()
             return False
          
+         
         is_read_to_cast, target_agent_id = self.IsReadyToCast(slot)
+ 
         if not is_read_to_cast:
             self.AdvanceSkillPointer()
             return False
         
         is_ooc_skill = self.IsOOCSkill(slot)
+
         if ooc and not is_ooc_skill:
             self.AdvanceSkillPointer()
             return False
@@ -1021,12 +959,13 @@ class CombatClass:
             return False
             
         self.in_casting_routine = True
+
         self.aftercast = Skill.Data.GetActivation(skill_id) * 1000
-        self.aftercast += Skill.Data.GetAftercast(skill_id) * 750
+        self.aftercast += Skill.Data.GetAftercast(skill_id) * 1000 #750
         #self.aftercast += 150 #manually setting a 50ms delay to test issues with pinghandler
-        #self.aftercast += self.ping_handler.GetCurrentPing()
+        self.aftercast += self.ping_handler.GetCurrentPing()
 
         self.aftercast_timer.Reset()
         ActionQueueManager().AddAction("ACTION", SkillBar.UseSkill, self.skill_order[self.skill_pointer]+1, target_agent_id)
-        self.AdvanceSkillPointer()
+        self.ResetSkillPointer()
         return True
